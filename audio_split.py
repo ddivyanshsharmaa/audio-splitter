@@ -17,9 +17,11 @@ import time
 import traceback
 from datetime import datetime
 
+import numpy as np
 import pyaudiowpatch as pyaudio
 
 import device_store
+import resampler
 import volume_util
 from config import VIRTUAL_SINK_NAME
 
@@ -49,11 +51,27 @@ def find_loopback(p, name_substr):
 
 
 def find_output(p, name_substr):
+    """Prefer the WASAPI endpoint for a device.
+
+    Windows exposes the same speaker several times -- once per audio
+    interface (MME, DirectSound, WASAPI). MME entries come first by index
+    and also truncate names to 31 characters, so a naive first-match scan
+    silently picks MME. That matters: some endpoints (HDMI, laptop
+    speakers here) produce no sound at all through MME, and MME adds
+    latency on top. The loopback capture is WASAPI, so the outputs should
+    be too.
+    """
+    wasapi = p.get_host_api_info_by_type(pyaudio.paWASAPI)["index"]
+    fallback = None
     for i in range(p.get_device_count()):
         d = p.get_device_info_by_index(i)
-        if d["maxOutputChannels"] > 0 and name_substr.lower() in d["name"].lower():
+        if d["maxOutputChannels"] <= 0 or name_substr.lower() not in d["name"].lower():
+            continue
+        if d["hostApi"] == wasapi:
             return d
-    return None
+        if fallback is None:
+            fallback = d
+    return fallback
 
 
 class DelayController:
@@ -89,18 +107,32 @@ class DelayController:
                 pass  # a half-written json during a save is not fatal
 
 
-def writer(p, dev, name, label, rate, channels, q, controller):
+def writer(p, dev, name, label, sink_rate, channels, q, controller):
     """Pulls captured audio off this output's queue and writes it to the
-    device, holding it back so it lands together with the others."""
+    device, holding it back so it lands together with the others.
+
+    WASAPI only accepts a stream at the endpoint's own rate, so audio is
+    resampled from the sink's rate to this device's rate on the way out.
+    """
+    device_rate = int(dev["defaultSampleRate"])
     try:
-        out_stream = p.open(format=pyaudio.paFloat32, channels=channels, rate=rate,
-                             output=True, output_device_index=dev["index"],
+        out_stream = p.open(format=pyaudio.paFloat32, channels=channels,
+                             rate=device_rate, output=True,
+                             output_device_index=dev["index"],
                              frames_per_buffer=CHUNK)
     except Exception:
-        log(f"Could not open output {label!r} ({dev['name']!r}):\n{traceback.format_exc()}")
+        log(f"Could not open output {label!r} ({dev['name']!r}) at {device_rate} Hz:\n"
+            f"{traceback.format_exc()}")
         return
 
+    convert = resampler.Resampler(sink_rate, device_rate, channels)
     buf = collections.deque()
+
+    def emit(raw):
+        frames = np.frombuffer(raw, dtype=np.float32).reshape(-1, channels)
+        converted = convert.process(frames)
+        if converted.shape[0]:
+            out_stream.write(converted.tobytes(), exception_on_underflow=False)
 
     try:
         while True:
@@ -108,6 +140,8 @@ def writer(p, dev, name, label, rate, channels, q, controller):
             if data is None:  # shutdown signal
                 break
 
+            # Delay is tracked in captured (sink-rate) chunks, so the
+            # figure stays the same regardless of this device's rate.
             delay_chunks = controller.delay_chunks.get(name, 0)
 
             # Latency was lowered while running -- drop the excess rather
@@ -116,11 +150,11 @@ def writer(p, dev, name, label, rate, channels, q, controller):
                 buf.popleft()
 
             if delay_chunks == 0:
-                out_stream.write(data, exception_on_underflow=False)
+                emit(data)
             else:
                 buf.append(data)
                 if len(buf) > delay_chunks:
-                    out_stream.write(buf.popleft(), exception_on_underflow=False)
+                    emit(buf.popleft())
     except Exception:
         log(f"Output {label!r} stopped:\n{traceback.format_exc()}")
     finally:
@@ -157,7 +191,7 @@ def main():
         queues = []
         threads = []
         for out in outputs:
-            if not out.get("enabled", True):
+            if not out.get("active", out.get("enabled", True)):
                 continue
 
             dev = find_output(p, out["name"])

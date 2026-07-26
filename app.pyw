@@ -110,11 +110,15 @@ class DeviceRow:
         self.lat_value.config(text=f"{self.latency.get()} ms")
         self.vol_value.config(text=f"{self.volume.get()} %")
 
-    def set_delay_text(self, delay_ms, is_slowest):
+    def set_delay_text(self, delay_ms, is_slowest, muted_by_mode=False):
         if not self.enabled.get():
             self.delay_label.config(text="off", fg=MUTED)
+        elif muted_by_mode:
+            self.delay_label.config(text="sitting out in video mode", fg=RED)
         elif is_slowest:
             self.delay_label.config(text="slowest - others wait for it", fg=ACCENT)
+        elif delay_ms == 0:
+            self.delay_label.config(text="no delay", fg=MUTED)
         else:
             self.delay_label.config(text=f"held back {delay_ms} ms", fg=MUTED)
         self.refresh_labels()
@@ -156,6 +160,23 @@ class App:
                                 font=("Segoe UI", 9), anchor="w")
         self.status.pack(fill="x", pady=(0, 8))
 
+        # --- music / video mode ---
+        mode_row = tk.Frame(outer, bg=BG)
+        mode_row.pack(fill="x", pady=(0, 10))
+
+        self.mode_buttons = {}
+        for mode, text in ((device_store.MUSIC_MODE, "Music"),
+                            (device_store.VIDEO_MODE, "Video")):
+            b = tk.Button(mode_row, text=text, bd=0, width=11, cursor="hand2",
+                           font=("Segoe UI", 9, "bold"),
+                           command=lambda m=mode: self.set_mode(m))
+            b.pack(side="left", padx=(0, 6))
+            self.mode_buttons[mode] = b
+
+        self.mode_note = tk.Label(mode_row, text="", bg=BG, fg=MUTED,
+                                   font=("Segoe UI", 8), anchor="w", justify="left")
+        self.mode_note.pack(side="left", padx=(6, 0))
+
         # --- device rows ---
         self.rows = []
         for out in device_store.get_outputs():
@@ -164,8 +185,10 @@ class App:
         hint = tk.Label(
             outer, bg=BG, fg=MUTED, justify="left", anchor="w",
             font=("Segoe UI", 8),
-            text=("Sounds early vs the others -> raise its latency.\n"
-                  "Sounds late  vs the others -> lower its latency.\n"
+            text=("A speaker sounds LATE  -> RAISE its slider (it waits less).\n"
+                  "A speaker sounds EARLY -> LOWER its slider (it waits more).\n"
+                  "The slider is how far that speaker lags on its own, so the\n"
+                  "higher it is, the less this app holds it back.\n"
                   "Changes apply live while audio is playing."),
         )
         hint.pack(fill="x", pady=(10, 0))
@@ -176,6 +199,32 @@ class App:
     # --- mirror control ---
     def restart_mirror(self):
         mirror_control.restart()
+
+    def set_mode(self, mode):
+        if device_store.get_mode() == mode:
+            return
+        device_store.set_mode(mode)
+        self.refresh_delays()
+        # Mode changes which speakers play at all, so the worker's threads
+        # have to be rebuilt -- unlike a latency tweak, this can't be
+        # picked up live.
+        if mirror_control.is_running():
+            self.restart_mirror()
+
+    def refresh_mode(self):
+        mode = device_store.get_mode()
+        for m, b in self.mode_buttons.items():
+            if m == mode:
+                b.config(bg=ACCENT, fg="#0d1a2b", activebackground=ACCENT)
+            else:
+                b.config(bg=CARD, fg=MUTED, activebackground=CARD)
+        if mode == device_store.VIDEO_MODE:
+            self.mode_note.config(
+                text="No delay, so audio stays with the picture.\n"
+                     f"Speakers lagging over {device_store.VIDEO_MAX_LATENCY_MS} ms sit out.")
+        else:
+            self.mode_note.config(
+                text="Every speaker in sync.\nAdds delay, so video will look out of sync.")
 
     def toggle(self):
         if mirror_control.is_running():
@@ -188,15 +237,17 @@ class App:
     def refresh_delays(self):
         outputs = device_store.get_outputs()
         delays = device_store.get_delays(outputs)
-        active = [o for o in outputs if o.get("enabled", True)]
+        active = [o for o in outputs if o.get("active", True)]
         slowest = max((o["latency_ms"] for o in active), default=None)
         by_name = {o["name"]: o for o in outputs}
         for row in self.rows:
             out = by_name.get(row.name, {})
             row.set_delay_text(
                 delays.get(row.name, 0),
-                out.get("latency_ms") == slowest and out.get("enabled", True),
+                out.get("active") and out.get("latency_ms") == slowest,
+                out.get("muted_by_mode", False),
             )
+        self.refresh_mode()
 
     def update_status(self):
         running = mirror_control.is_running()

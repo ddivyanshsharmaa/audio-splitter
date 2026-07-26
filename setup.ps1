@@ -52,6 +52,15 @@ $app.Hotkey = "CTRL+ALT+K"
 $app.Description = "Audio Splitter control panel - per-device latency and volume"
 $app.Save()
 
+$mode = $WshShell.CreateShortcut("$env:USERPROFILE\Desktop\Audio Music-Video Mode.lnk")
+$mode.TargetPath = "$here\venv\Scripts\pythonw.exe"
+$mode.Arguments = "`"$here\toggle_mode.pyw`""
+$mode.WorkingDirectory = $here
+$mode.IconLocation = "C:\Windows\System32\SndVol.exe,0"
+$mode.Hotkey = "CTRL+ALT+M"
+$mode.Description = "Switch between music mode (all speakers synced) and video mode (no delay)"
+$mode.Save()
+
 # Shortcuts from earlier versions, if present.
 Remove-Item "$env:USERPROFILE\Desktop\Audio Delay Increase.lnk" -ErrorAction SilentlyContinue
 Remove-Item "$env:USERPROFILE\Desktop\Audio Delay Decrease.lnk" -ErrorAction SilentlyContinue
@@ -62,4 +71,5 @@ Write-Host "Done. Before first use:" -ForegroundColor Green
 Write-Host "  1. Run: .\venv\Scripts\python.exe .\list_devices.py"
 Write-Host "  2. Edit config.py -- list every speaker you want in OUTPUTS"
 Write-Host "  3. Run: .\venv\Scripts\python.exe .\device_check.py  (confirm each is audible)"
-Write-Host "  4. Press Ctrl+Alt+K for the app, or Ctrl+Alt+B to toggle on/off"
+Write-Host "  4. Ctrl+Alt+K opens the app, Ctrl+Alt+B toggles it on/off,"
+Write-Host "     Ctrl+Alt+M switches between music and video mode"

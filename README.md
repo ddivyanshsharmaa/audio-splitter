@@ -93,6 +93,26 @@ restart, no gap — so you can tune sync by ear in real time.
 **Ctrl+Alt+B** toggles the mirror on/off without opening the window, with
 a beep for feedback (high = on, low = off).
 
+## Music mode vs video mode
+
+Keeping speakers in sync means they all wait for the slowest one, so with
+a Bluetooth speaker in the mix *every* speaker is delayed by its lag. For
+music that's unnoticeable. For video it isn't: the audio ends up a couple
+of hundred milliseconds behind the picture, and nothing here can fix that,
+because the only real correction would be delaying the video — which lives
+in your player or browser, not this app.
+
+So there are two modes, switchable in the app or with **Ctrl+Alt+M**:
+
+| Mode | What plays | Delay added |
+|---|---|---|
+| **Music** | every enabled speaker, all in sync | as much as the slowest speaker lags |
+| **Video** | only speakers lagging under 50 ms | none — audio stays with the picture |
+
+Video mode doesn't change your per-speaker on/off choices; it just sets
+the laggy ones aside until you switch back. The threshold is
+`VIDEO_MAX_LATENCY_MS` in `device_store.py`.
+
 ## Calibrating sync
 
 Each output declares its own latency — how far *that device* naturally
@@ -107,8 +127,13 @@ else wait for it.
 Play something with a sharp repeated beat (a clap track or metronome beats
 guesswork), turn the mirror on, then drag the latency sliders:
 
-- a speaker sounds **early** relative to the others → raise its latency
-- a speaker sounds **late** relative to the others → lower its latency
+- a speaker sounds **late** relative to the others → **raise** its slider
+- a speaker sounds **early** relative to the others → **lower** its slider
+
+The slider is how far that speaker lags *on its own*, and each output is
+held back by `(slowest − its own)`. So raising a speaker's number reduces
+how long it waits, making it play sooner — which is the fix when it sounds
+late. Lowering it makes it wait longer.
 
 Settings are saved to `settings.json` and persist across sessions.
 

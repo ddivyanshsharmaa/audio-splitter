@@ -16,6 +16,15 @@ MIN_LATENCY_MS = 0
 MAX_LATENCY_MS = 1000
 DEFAULT_VOLUME = 100
 
+# Keeping every speaker in sync means they all wait for the slowest one,
+# which puts the audio behind the picture. Video mode drops any speaker
+# that lags more than this, so nothing has to be held back and lip-sync
+# stays correct -- at the cost of not using those speakers.
+MUSIC_MODE = "music"
+VIDEO_MODE = "video"
+VIDEO_MAX_LATENCY_MS = 50
+_MODE_KEY = "__mode__"
+
 
 def _load():
     try:
@@ -34,9 +43,29 @@ def _save(data):
     os.replace(tmp, STORE_FILE)
 
 
+def get_mode():
+    mode = _load().get(_MODE_KEY, MUSIC_MODE)
+    return mode if mode in (MUSIC_MODE, VIDEO_MODE) else MUSIC_MODE
+
+
+def set_mode(mode):
+    if mode not in (MUSIC_MODE, VIDEO_MODE):
+        raise ValueError(mode)
+    data = _load()
+    data[_MODE_KEY] = mode
+    _save(data)
+    return mode
+
+
 def get_outputs():
-    """config.py's OUTPUTS with any saved latency/volume applied."""
+    """config.py's OUTPUTS with saved latency/volume applied.
+
+    `enabled` is the user's own on/off choice and is never touched by mode
+    switching. `active` is whether it actually plays right now, which video
+    mode narrows to the low-latency speakers.
+    """
     saved = _load()
+    mode = get_mode()
     merged = []
     for out in OUTPUTS:
         entry = dict(out)
@@ -46,6 +75,9 @@ def get_outputs():
         entry["enabled"] = True
         for key, value in saved.get(out["name"], {}).items():
             entry[key] = value
+        entry["muted_by_mode"] = (mode == VIDEO_MODE
+                                   and entry["latency_ms"] > VIDEO_MAX_LATENCY_MS)
+        entry["active"] = entry["enabled"] and not entry["muted_by_mode"]
         merged.append(entry)
     return merged
 
@@ -72,10 +104,14 @@ def set_enabled(name, value):
 
 
 def get_delays(outputs=None):
-    """Map each output name -> how long to hold it back so every enabled
-    device emits sound at the same instant. The slowest waits for nobody."""
+    """Map each output name -> how long to hold it back so every playing
+    device emits sound at the same instant. The slowest waits for nobody.
+
+    Only currently-active outputs count towards "slowest": that's what
+    makes video mode drop the delay to zero once Bluetooth is excluded.
+    """
     outputs = outputs if outputs is not None else get_outputs()
-    active = [o for o in outputs if o.get("enabled", True)]
+    active = [o for o in outputs if o.get("active", o.get("enabled", True))]
     if not active:
         return {o["name"]: 0 for o in outputs}
     slowest = max(o["latency_ms"] for o in active)
