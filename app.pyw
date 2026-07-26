@@ -7,20 +7,12 @@ volume both apply immediately while audio is playing -- no restart, no gap.
 
 Run:  .\venv\Scripts\pythonw.exe .\app.pyw
 """
-import os
-import subprocess
 import tkinter as tk
 from tkinter import ttk
 
 import device_store
-import proc_utils
+import mirror_control
 import volume_util
-from config import VIRTUAL_SINK_NAME
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-PYTHONW = os.path.join(HERE, "venv", "Scripts", "pythonw.exe")
-SCRIPT = os.path.join(HERE, "audio_split.py")
-PREV_DEFAULT_FILE = os.path.join(HERE, "prev_default.txt")
 
 BG = "#1e1f26"
 FG = "#e8e8ec"
@@ -29,26 +21,6 @@ ACCENT = "#4a9eff"
 CARD = "#282a35"
 GREEN = "#3ecf8e"
 RED = "#ff5f56"
-
-
-def ps(cmd):
-    return subprocess.run(
-        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", cmd],
-        capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW,
-    ).stdout.strip()
-
-
-def get_default_playback():
-    return ps("Import-Module AudioDeviceCmdlets; "
-              "(Get-AudioDevice -List | Where-Object {$_.Type -eq 'Playback' -and "
-              "$_.Default -eq $true}).Name")
-
-
-def set_default_playback(name):
-    safe = name.replace("'", "''")
-    ps("Import-Module AudioDeviceCmdlets; "
-       f"$d = Get-AudioDevice -List | Where-Object {{$_.Type -eq 'Playback' -and $_.Name -eq '{safe}'}}; "
-       "Set-AudioDevice -Index $d.Index")
 
 
 class DeviceRow:
@@ -118,7 +90,7 @@ class DeviceRow:
         device_store.set_enabled(self.name, self.enabled.get())
         self.app.refresh_delays()
         # Adding/removing an output changes which threads must exist.
-        if proc_utils.is_running():
+        if mirror_control.is_running():
             self.app.restart_mirror()
 
     def on_latency(self, _=None):
@@ -202,38 +174,14 @@ class App:
         self.tick()
 
     # --- mirror control ---
-    def start_mirror(self):
-        prev = get_default_playback()
-        if prev and VIRTUAL_SINK_NAME.lower() not in prev.lower():
-            with open(PREV_DEFAULT_FILE, "w", encoding="utf-8") as f:
-                f.write(prev)
-        set_default_playback(VIRTUAL_SINK_NAME)
-        subprocess.Popen(
-            [PYTHONW, SCRIPT], cwd=HERE,
-            creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
-        )
-
-    def stop_mirror(self):
-        proc_utils.kill_all()
-        if os.path.exists(PREV_DEFAULT_FILE):
-            with open(PREV_DEFAULT_FILE, encoding="utf-8") as f:
-                prev = f.read().strip()
-            if prev:
-                set_default_playback(prev)
-            os.remove(PREV_DEFAULT_FILE)
-
     def restart_mirror(self):
-        proc_utils.kill_all()
-        self.root.after(400, lambda: subprocess.Popen(
-            [PYTHONW, SCRIPT], cwd=HERE,
-            creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
-        ))
+        mirror_control.restart()
 
     def toggle(self):
-        if proc_utils.is_running():
-            self.stop_mirror()
+        if mirror_control.is_running():
+            mirror_control.stop()
         else:
-            self.start_mirror()
+            mirror_control.start()
         self.root.after(600, self.update_status)
 
     # --- display ---
@@ -251,7 +199,7 @@ class App:
             )
 
     def update_status(self):
-        running = proc_utils.is_running()
+        running = mirror_control.is_running()
         if running:
             self.toggle_btn.config(text="ON", bg=GREEN, activebackground=GREEN,
                                     fg="#10221a")
