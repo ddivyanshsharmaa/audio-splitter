@@ -7,6 +7,7 @@ volume both apply immediately while audio is playing -- no restart, no gap.
 
 Run:  .\venv\Scripts\pythonw.exe .\app.pyw
 """
+import os
 import tkinter as tk
 from tkinter import ttk
 
@@ -87,6 +88,8 @@ class DeviceRow:
         self.refresh_labels()
 
     def on_enabled(self):
+        if self.app.loading:
+            return
         device_store.set_enabled(self.name, self.enabled.get())
         self.app.refresh_delays()
         # Adding/removing an output changes which threads must exist.
@@ -94,16 +97,31 @@ class DeviceRow:
             self.app.restart_mirror()
 
     def on_latency(self, _=None):
+        if self.app.loading:
+            return
         value = int(float(self.lat_scale.get()))
         self.latency.set(value)
         device_store.set_latency(self.name, value)
         self.app.refresh_delays()
 
     def on_volume(self, _=None):
+        if self.app.loading:
+            return
         value = int(float(self.vol_scale.get()))
         self.volume.set(value)
         device_store.set_volume(self.name, value)
-        volume_util.set_volume_percent(self.name, value)
+        # Driving the endpoint is a COM call; at one per pixel of drag it
+        # makes the slider feel sticky, so coalesce to the latest value.
+        self.app.queue_volume(self.name, value)
+        self.refresh_labels()
+
+    def load_from(self, out):
+        """Adopt values changed elsewhere (tuner, hotkey, another window)."""
+        self.lat_scale.set(out["latency_ms"])
+        self.latency.set(out["latency_ms"])
+        self.vol_scale.set(out["volume"])
+        self.volume.set(out["volume"])
+        self.enabled.set(out.get("enabled", True))
         self.refresh_labels()
 
     def refresh_labels(self):
@@ -127,6 +145,14 @@ class DeviceRow:
 class App:
     def __init__(self, root):
         self.root = root
+        # Set while adopting values from disk, so writing them into the
+        # widgets doesn't look like the user dragging and get written
+        # straight back out.
+        self.loading = False
+        self._store_mtime = None
+        self._pending_volume = {}
+        self._volume_job = None
+
         root.title("Audio Splitter")
         root.configure(bg=BG)
         root.resizable(False, False)
@@ -249,6 +275,40 @@ class App:
             )
         self.refresh_mode()
 
+    def queue_volume(self, name, value):
+        self._pending_volume[name] = value
+        if self._volume_job is None:
+            self._volume_job = self.root.after(60, self._flush_volume)
+
+    def _flush_volume(self):
+        self._volume_job = None
+        pending, self._pending_volume = self._pending_volume, {}
+        for name, value in pending.items():
+            volume_util.set_volume_percent(name, value)
+
+    def sync_from_store(self):
+        """Adopt changes made outside this window -- the tuner, the mode
+        hotkey, a second copy of the app. Without this the sliders drift
+        out of date and the next drag silently reverts whatever changed."""
+        try:
+            mtime = os.path.getmtime(device_store.STORE_FILE)
+        except OSError:
+            return
+        if mtime == self._store_mtime:
+            return
+        self._store_mtime = mtime
+
+        by_name = {o["name"]: o for o in device_store.get_outputs()}
+        self.loading = True
+        try:
+            for row in self.rows:
+                out = by_name.get(row.name)
+                if out:
+                    row.load_from(out)
+        finally:
+            self.loading = False
+        self.refresh_delays()
+
     def update_status(self):
         running = mirror_control.is_running()
         if running:
@@ -261,8 +321,9 @@ class App:
             self.status.config(text="Off - audio goes to your normal device.")
 
     def tick(self):
+        self.sync_from_store()
         self.update_status()
-        self.root.after(1500, self.tick)
+        self.root.after(700, self.tick)
 
 
 def main():

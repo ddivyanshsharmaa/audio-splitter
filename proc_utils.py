@@ -1,32 +1,52 @@
 """
 Finds/kills the audio_split.py worker by matching its command line rather
-than trusting a single self-reported PID -- Python 3.14's venv launcher on
+than trusting a single self-reported PID -- Python's venv launcher on
 Windows spawns a stub process that then launches a separate child process
-to actually run the script, so a single PID file only ever tracked the
-stub and silently missed the real worker.
+to actually run the script, so a PID file only ever tracked the stub and
+silently missed the real worker.
+
+Uses psutil rather than shelling out: the app polls this about once a
+second, and spawning a PowerShell process to run a WMI process query at
+that rate is far more expensive than the check itself.
 """
-import subprocess
+import os
+
+import psutil
+
+SCRIPT_NAME = "audio_split.py"
 
 
 def find_audio_split_pids():
-    # Name filter matters: without it, the powershell.exe running THIS very
-    # query also matches, since its own command line contains the literal
-    # search string "audio_split.py".
-    out = subprocess.run(
-        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
-         "Get-CimInstance Win32_Process | "
-         "Where-Object { $_.Name -like 'python*.exe' -and $_.CommandLine -like '*audio_split.py*' } | "
-         "Select-Object -ExpandProperty ProcessId"],
-        capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW,
-    ).stdout
-    return [int(x) for x in out.split() if x.strip().isdigit()]
+    pids = []
+    for proc in psutil.process_iter(["name", "cmdline"]):
+        try:
+            name = (proc.info["name"] or "").lower()
+            if not name.startswith("python"):
+                continue
+            cmdline = proc.info["cmdline"] or []
+            if any(SCRIPT_NAME in part for part in cmdline):
+                pids.append(proc.pid)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return pids
 
 
 def is_running() -> bool:
-    return len(find_audio_split_pids()) > 0
+    return bool(find_audio_split_pids())
 
 
 def kill_all():
+    me = os.getpid()
     for pid in find_audio_split_pids():
-        subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"],
-                        capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        if pid == me:
+            continue
+        try:
+            proc = psutil.Process(pid)
+            for child in proc.children(recursive=True):
+                try:
+                    child.kill()
+                except psutil.Error:
+                    pass
+            proc.kill()
+        except psutil.Error:
+            pass
