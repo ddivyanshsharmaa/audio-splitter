@@ -25,11 +25,20 @@ import resampler
 import volume_util
 from config import VIRTUAL_SINK_NAME
 
-CHUNK = 120  # ~2.5ms at 48kHz -- fine enough resolution for delay tuning
+# ~10ms at 44.1/48kHz. Smaller chunks give finer delay resolution but cost
+# a fixed amount of Python work each, and with one resampling writer per
+# speaker that overhead is what decides whether the pipeline keeps up at
+# all. 120-frame chunks did not: the writers fell behind the capture and
+# the queues below grew until playback ran most of a second late.
+CHUNK = 480
 
-# Bounded so a stalled/disconnected device can't grow its queue forever.
-# 800 chunks is ~2s of audio, comfortably above the 1000ms max delay.
-QUEUE_MAX_CHUNKS = 800
+# The queue is transport only -- the delay buffer lives in each writer --
+# so it must stay shallow. A deep queue silently turns into latency: a
+# backlog is only shed once the queue is completely full, so its depth is
+# the maximum an output can drift behind real time. At 800 (~2s) the
+# pipeline settled most of a second late; a handful of chunks rides out a
+# scheduling hiccup without becoming audible lag.
+QUEUE_MAX_CHUNKS = 4
 
 # This runs under pythonw.exe with no console, so anything printed to
 # stdout/stderr is lost. Failures (a device name in config.py that matches
