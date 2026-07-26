@@ -6,7 +6,10 @@ __pycache__/
 config.py
 
 # Runtime state
-latencies.json
+settings.json
+settings.json.tmp
 prev_default.txt
 audio_split.pid
 error.log
+app_out.txt
+app_err.txt

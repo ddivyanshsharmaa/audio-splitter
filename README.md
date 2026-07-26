@@ -70,17 +70,33 @@ jack** (hardware jack-sensing), which no software can override.
 
 ## Usage
 
-| Hotkey | Action |
-|---|---|
-| **Ctrl+Alt+B** | Toggle the mirror on/off. On: switches Windows' default output to the virtual sink and starts playing through every configured speaker. Off: stops and restores your previous default device. |
-| **Ctrl+Alt+K** | Open the calibration tool to sync the speakers. |
+Launch the control panel (**Ctrl+Alt+K**, or the *Audio Splitter* desktop
+shortcut) for a window with a master on/off switch and, per speaker, a
+live latency slider, a volume slider, and an enable checkbox:
 
-A beep confirms the toggle since it runs windowless (high = on, low = off).
+```
+  Audio Splitter                                    [  ON  ]
+  Playing through every enabled speaker.
+
+  [x] Laptop speakers                      held back 310 ms
+      Latency  [|---------------]                     0 ms
+      Volume   [=============|--]                    85 %
+
+  [x] Bluetooth              slowest - others wait for it
+      Latency  [=====|----------]                   310 ms
+      Volume   [================]                   100 %
+```
+
+Latency and volume both apply **immediately while audio is playing** — no
+restart, no gap — so you can tune sync by ear in real time.
+
+**Ctrl+Alt+B** toggles the mirror on/off without opening the window, with
+a beep for feedback (high = on, low = off).
 
 ## Calibrating sync
 
-Each output declares its own `latency_ms` — how far *that device* naturally
-lags. The script then holds every output back by
+Each output declares its own latency — how far *that device* naturally
+lags. The mirror then holds every output back by
 `(slowest latency − its own latency)`, so they all emit sound at the same
 instant. Bluetooth is usually the slowest by far (100–300ms depending on
 codec); wired analog is effectively zero.
@@ -89,24 +105,12 @@ Bluetooth latency can't be removed — only *matched*, by making everything
 else wait for it.
 
 Play something with a sharp repeated beat (a clap track or metronome beats
-guesswork), turn the mirror on, then press **Ctrl+Alt+K**:
+guesswork), turn the mirror on, then drag the latency sliders:
 
-```
-      Device                  own latency   held back by
-  --------------------------------------------------------------
-     1. Laptop speakers            0 ms         310 ms
-     2. Aux speakers               0 ms         310 ms
-     3. HDMI monitor              40 ms         270 ms
-  >> 4. Bluetooth                310 ms           0 ms  <- slowest
-```
+- a speaker sounds **early** relative to the others → raise its latency
+- a speaker sounds **late** relative to the others → lower its latency
 
-Select a device with its number key, then:
-
-- it sounds **early** relative to the others → raise its latency (`+`)
-- it sounds **late** relative to the others → lower its latency (`-`)
-- `PgUp`/`PgDn` for 50ms jumps, `ENTER` to apply and hear the result
-
-Values are saved to `latencies.json` and persist across sessions.
+Settings are saved to `settings.json` and persist across sessions.
 
 Note: even perfectly matched delays can sound slightly smeared if your
 speakers sit at very different distances from you — sound itself takes
@@ -126,8 +130,8 @@ that dropped off mid-session, gets written there instead.
   bypassing the mirror entirely. If it's silent there too, the problem is
   that device or its connection, not this project.
 - **A speaker is quieter than expected**: once a device isn't the Windows
-  default, the taskbar volume slider stops reaching it. The mirror forces
-  every output to 100% on start.
+  default, the taskbar volume slider stops reaching it — use the app's
+  per-device volume slider instead, which drives the endpoint directly.
 
 ## How it works
 
@@ -137,6 +141,10 @@ device drains its queue through a FIFO delay buffer sized to that device's
 hold-back, then writes to the endpoint. Capturing once and distributing
 guarantees every speaker gets byte-identical audio; bounded queues mean a
 device that stalls drops old audio instead of drifting further behind.
+
+Delay buffers are resized on the fly: a watcher thread notices when
+`settings.json` changes and updates each writer's hold-back, which is what
+makes the app's sliders take effect mid-playback rather than on restart.
 
 `toggle.pyw` manages the Windows default device and the worker process,
 tracking it by matching command lines (`proc_utils.py`) rather than a

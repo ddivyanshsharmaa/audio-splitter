@@ -43,21 +43,23 @@ $toggle.Hotkey = "CTRL+ALT+B"
 $toggle.Description = "Toggle mirroring aux speaker audio to Bluetooth speaker"
 $toggle.Save()
 
-$cal = $WshShell.CreateShortcut("$env:USERPROFILE\Desktop\Audio Calibrate.lnk")
-$cal.TargetPath = "$here\venv\Scripts\python.exe"
-$cal.Arguments = "`"$here\calibrate.py`""
-$cal.WorkingDirectory = $here
-$cal.Hotkey = "CTRL+ALT+K"
-$cal.Description = "Open the per-device latency calibration tool"
-$cal.Save()
+$app = $WshShell.CreateShortcut("$env:USERPROFILE\Desktop\Audio Splitter.lnk")
+$app.TargetPath = "$here\venv\Scripts\pythonw.exe"
+$app.Arguments = "`"$here\app.pyw`""
+$app.WorkingDirectory = $here
+$app.IconLocation = "C:\Windows\System32\SndVol.exe,0"
+$app.Hotkey = "CTRL+ALT+K"
+$app.Description = "Audio Splitter control panel - per-device latency and volume"
+$app.Save()
 
-# Old two-device shortcuts from before multi-output support, if present.
+# Shortcuts from earlier versions, if present.
 Remove-Item "$env:USERPROFILE\Desktop\Audio Delay Increase.lnk" -ErrorAction SilentlyContinue
 Remove-Item "$env:USERPROFILE\Desktop\Audio Delay Decrease.lnk" -ErrorAction SilentlyContinue
+Remove-Item "$env:USERPROFILE\Desktop\Audio Calibrate.lnk" -ErrorAction SilentlyContinue
 
 Write-Host ""
 Write-Host "Done. Before first use:" -ForegroundColor Green
 Write-Host "  1. Run: .\venv\Scripts\python.exe .\list_devices.py"
 Write-Host "  2. Edit config.py -- list every speaker you want in OUTPUTS"
 Write-Host "  3. Run: .\venv\Scripts\python.exe .\device_check.py  (confirm each is audible)"
-Write-Host "  4. Press Ctrl+Alt+B to turn it on, Ctrl+Alt+K to calibrate sync"
+Write-Host "  4. Press Ctrl+Alt+K for the app, or Ctrl+Alt+B to toggle on/off"

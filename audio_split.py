@@ -13,12 +13,13 @@ import os
 import queue
 import sys
 import threading
+import time
 import traceback
 from datetime import datetime
 
 import pyaudiowpatch as pyaudio
 
-import latency_store
+import device_store
 import volume_util
 from config import VIRTUAL_SINK_NAME
 
@@ -55,9 +56,42 @@ def find_output(p, name_substr):
     return None
 
 
-def writer(p, dev, label, delay_ms, rate, channels, q):
+class DelayController:
+    """Holds the current per-device hold-back in chunks, refreshed from
+    settings.json whenever it changes on disk. Lets the app retune sync
+    live instead of forcing a restart (and an audible gap) per nudge."""
+
+    POLL_SECONDS = 0.3
+
+    def __init__(self, rate):
+        self.chunk_ms = CHUNK / rate * 1000
+        self.delay_chunks = {}
+        self._mtime = None
+        self.refresh(force=True)
+
+    def refresh(self, force=False):
+        try:
+            mtime = os.path.getmtime(device_store.STORE_FILE)
+        except OSError:
+            mtime = None
+        if not force and mtime == self._mtime:
+            return
+        self._mtime = mtime
+        for name, ms in device_store.get_delays().items():
+            self.delay_chunks[name] = max(0, round(ms / self.chunk_ms))
+
+    def watch(self):
+        while True:
+            time.sleep(self.POLL_SECONDS)
+            try:
+                self.refresh()
+            except Exception:
+                pass  # a half-written json during a save is not fatal
+
+
+def writer(p, dev, name, label, rate, channels, q, controller):
     """Pulls captured audio off this output's queue and writes it to the
-    device, holding it back by delay_ms so it lands with the others."""
+    device, holding it back so it lands together with the others."""
     try:
         out_stream = p.open(format=pyaudio.paFloat32, channels=channels, rate=rate,
                              output=True, output_device_index=dev["index"],
@@ -66,8 +100,6 @@ def writer(p, dev, label, delay_ms, rate, channels, q):
         log(f"Could not open output {label!r} ({dev['name']!r}):\n{traceback.format_exc()}")
         return
 
-    chunk_ms = CHUNK / rate * 1000
-    delay_chunks = max(0, round(delay_ms / chunk_ms))
     buf = collections.deque()
 
     try:
@@ -75,6 +107,14 @@ def writer(p, dev, label, delay_ms, rate, channels, q):
             data = q.get()
             if data is None:  # shutdown signal
                 break
+
+            delay_chunks = controller.delay_chunks.get(name, 0)
+
+            # Latency was lowered while running -- drop the excess rather
+            # than replay it at speed, which would sound like a stutter.
+            while len(buf) > delay_chunks:
+                buf.popleft()
+
             if delay_chunks == 0:
                 out_stream.write(data, exception_on_underflow=False)
             else:
@@ -92,18 +132,10 @@ def writer(p, dev, label, delay_ms, rate, channels, q):
 
 
 def main():
-    outputs = latency_store.get_outputs()
+    outputs = device_store.get_outputs()
     if not outputs:
         log("No OUTPUTS configured in config.py -- nothing to do.")
         sys.exit(1)
-
-    delays = latency_store.get_delays(outputs)
-
-    # Endpoints keep whatever volume they were last left at once they're no
-    # longer the Windows default device -- the taskbar slider stops reaching
-    # them. Force every output to 100% so none is silently capped.
-    for out in outputs:
-        volume_util.set_volume_percent(out["name"], 100)
 
     p = pyaudio.PyAudio()
     try:
@@ -116,29 +148,42 @@ def main():
         rate = int(sink["defaultSampleRate"])
         channels = min(int(sink["maxInputChannels"]), 2)
 
+        controller = DelayController(rate)
+        threading.Thread(target=controller.watch, daemon=True).start()
+
         # One queue per output, fed by a single capture. Capturing once and
         # fanning out guarantees every speaker gets byte-identical audio and
         # avoids opening N simultaneous loopback captures on one endpoint.
         queues = []
         threads = []
         for out in outputs:
+            if not out.get("enabled", True):
+                continue
+
             dev = find_output(p, out["name"])
             if dev is None:
                 log(f"Output device not found: {out['name']!r} ({out.get('label', '')}) "
                     f"-- check the name in config.py against list_devices.py output.")
                 continue
+
+            # Endpoints keep whatever volume they were last left at once
+            # they're no longer the Windows default -- the taskbar slider
+            # stops reaching them. Apply this device's saved level so it
+            # isn't silently capped at wherever it happened to be.
+            volume_util.set_volume_percent(out["name"], out.get("volume", 100))
+
             q = queue.Queue(maxsize=QUEUE_MAX_CHUNKS)
             t = threading.Thread(
                 target=writer,
-                args=(p, dev, out.get("label", out["name"]), delays[out["name"]],
-                      rate, channels, q),
+                args=(p, dev, out["name"], out.get("label", out["name"]),
+                      rate, channels, q, controller),
                 daemon=True,
             )
             queues.append(q)
             threads.append(t)
 
         if not threads:
-            log("None of the configured OUTPUTS matched a real device -- nothing to play to.")
+            log("No enabled OUTPUTS matched a real device -- nothing to play to.")
             sys.exit(1)
 
         for t in threads:
@@ -148,7 +193,7 @@ def main():
                             input=True, input_device_index=sink["index"],
                             frames_per_buffer=CHUNK)
         try:
-            # Runs until the process is killed by toggle.pyw / calibrate.py.
+            # Runs until the process is killed by toggle.pyw / the app.
             while True:
                 data = in_stream.read(CHUNK, exception_on_overflow=False)
                 for q in queues:
