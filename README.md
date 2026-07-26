@@ -57,6 +57,11 @@ OUTPUTS = [
 
 Names are matched as substrings, so a distinctive fragment is enough.
 
+`config.py` only seeds the first run. Once you add or remove a speaker in
+the app, the list is kept in `settings.json` (also gitignored) and the app
+manages it from then on — `VIRTUAL_SINK_NAME` is the one value that always
+comes from `config.py`.
+
 Finally, confirm each one is actually audible in your physical setup:
 
 ```powershell
@@ -89,6 +94,18 @@ live latency slider, a volume slider, and an enable checkbox:
 
 Latency and volume both apply **immediately while audio is playing** — no
 restart, no gap — so you can tune sync by ear in real time.
+
+**Adding and removing speakers:** hit **+ Add a speaker** and the app scans
+for playback devices you haven't configured yet, so you don't have to edit
+`config.py` by hand. The **×** on a row removes that speaker again. Only
+WASAPI endpoints are offered, since those are the ones the mirror can
+actually drive, and the virtual sink is excluded because it's the routing
+point rather than a speaker.
+
+Windows only exposes a device once it is genuinely connected, so plug in or
+pair a speaker before adding it. Once configured, a speaker whose cable is
+pulled (or whose Bluetooth audio drops) is marked **not connected** in the
+window — usually the real explanation for a speaker that has gone silent.
 
 **Ctrl+Alt+B** toggles the mirror on/off without opening the window, with
 a beep for feedback (high = on, low = off).

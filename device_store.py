@@ -25,6 +25,11 @@ VIDEO_MODE = "video"
 VIDEO_MAX_LATENCY_MS = 50
 _MODE_KEY = "__mode__"
 
+# The speaker list itself is stored here once the user adds or removes one,
+# so the app can manage it. config.py only seeds the first run -- editing
+# source files to add a speaker would be a poor way to run this.
+_OUTPUTS_KEY = "__outputs__"
+
 
 def _load():
     try:
@@ -57,8 +62,44 @@ def set_mode(mode):
     return mode
 
 
+def _base_outputs(saved=None):
+    """The configured speaker list: whatever the app has saved, otherwise
+    config.py's OUTPUTS as the first-run seed."""
+    saved = _load() if saved is None else saved
+    stored = saved.get(_OUTPUTS_KEY)
+    if isinstance(stored, list) and stored:
+        return [dict(o) for o in stored if isinstance(o, dict) and o.get("name")]
+    return [dict(o) for o in OUTPUTS]
+
+
+def add_output(name, label=None):
+    """Start playing to another speaker. Existing entries are left alone so
+    re-adding one keeps its tuning."""
+    name = name.strip()
+    if not name:
+        return _base_outputs()
+    data = _load()
+    outputs = _base_outputs(data)
+    if any(o["name"] == name for o in outputs):
+        return outputs
+    outputs.append({"name": name, "label": label or name, "latency_ms": 0})
+    data[_OUTPUTS_KEY] = outputs
+    _save(data)
+    return outputs
+
+
+def remove_output(name):
+    """Stop playing to a speaker and forget its settings."""
+    data = _load()
+    outputs = [o for o in _base_outputs(data) if o["name"] != name]
+    data[_OUTPUTS_KEY] = outputs
+    data.pop(name, None)
+    _save(data)
+    return outputs
+
+
 def get_outputs():
-    """config.py's OUTPUTS with saved latency/volume applied.
+    """The configured speakers with saved latency/volume applied.
 
     `enabled` is the user's own on/off choice and is never touched by mode
     switching. `active` is whether it actually plays right now, which video
@@ -67,7 +108,7 @@ def get_outputs():
     saved = _load()
     mode = get_mode()
     merged = []
-    for out in OUTPUTS:
+    for out in _base_outputs(saved):
         entry = dict(out)
         entry.setdefault("label", out["name"])
         entry.setdefault("latency_ms", 0)

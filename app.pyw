@@ -9,8 +9,9 @@ Run:  .\venv\Scripts\pythonw.exe .\app.pyw
 """
 import os
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
+import device_scan
 import device_store
 import mirror_control
 import volume_util
@@ -47,6 +48,15 @@ class DeviceRow:
 
         tk.Label(header, text=output.get("label", self.name), bg=CARD, fg=FG,
                   font=("Segoe UI", 11, "bold")).pack(side="left", padx=(4, 0))
+
+        self.conn_label = tk.Label(header, text="", bg=CARD, fg=MUTED,
+                                    font=("Segoe UI", 8))
+        self.conn_label.pack(side="left", padx=(8, 0))
+
+        tk.Button(header, text="×", command=self.on_remove, bd=0,
+                   bg=CARD, fg=MUTED, activebackground=CARD, activeforeground=RED,
+                   font=("Segoe UI", 12, "bold"), cursor="hand2",
+                   ).pack(side="right", padx=(8, 0))
 
         self.delay_label = tk.Label(header, text="", bg=CARD, fg=MUTED,
                                      font=("Segoe UI", 9))
@@ -114,6 +124,22 @@ class DeviceRow:
         # makes the slider feel sticky, so coalesce to the latest value.
         self.app.queue_volume(self.name, value)
         self.refresh_labels()
+
+    def on_remove(self):
+        if not messagebox.askyesno(
+                "Remove speaker",
+                f"Stop playing to {self.output.get('label', self.name)}?\n\n"
+                f"Its latency and volume settings will be forgotten. You can "
+                f"add it again later."):
+            return
+        device_store.remove_output(self.name)
+        self.app.rebuild_rows()
+
+    def set_connected(self, connected):
+        if connected:
+            self.conn_label.config(text="")
+        else:
+            self.conn_label.config(text="not connected", fg=RED)
 
     def load_from(self, out):
         """Adopt values changed elsewhere (tuner, hotkey, another window)."""
@@ -203,10 +229,17 @@ class App:
                                    font=("Segoe UI", 8), anchor="w", justify="left")
         self.mode_note.pack(side="left", padx=(6, 0))
 
-        # --- device rows ---
+        # --- device rows (rebuilt when speakers are added or removed) ---
+        self.rows_container = tk.Frame(outer, bg=BG)
+        self.rows_container.pack(fill="x")
         self.rows = []
-        for out in device_store.get_outputs():
-            self.rows.append(DeviceRow(outer, out, self))
+
+        self.add_btn = tk.Button(
+            outer, text="+  Add a speaker", command=self.add_speaker, bd=0,
+            bg=CARD, fg=FG, activebackground=CARD, activeforeground=ACCENT,
+            font=("Segoe UI", 9, "bold"), cursor="hand2", pady=7,
+        )
+        self.add_btn.pack(fill="x", pady=(8, 0))
 
         hint = tk.Label(
             outer, bg=BG, fg=MUTED, justify="left", anchor="w",
@@ -219,8 +252,71 @@ class App:
         )
         hint.pack(fill="x", pady=(10, 0))
 
-        self.refresh_delays()
+        self.build_rows()
         self.tick()
+
+    # --- speaker list ---
+    def build_rows(self):
+        for row in self.rows:
+            row.card.destroy()
+        self.rows = [DeviceRow(self.rows_container, out, self)
+                     for out in device_store.get_outputs()]
+        self.refresh_delays()
+
+    def rebuild_rows(self):
+        """After adding or removing a speaker: redraw, and reload the worker
+        since which outputs exist decides which threads it needs."""
+        self._store_mtime = None      # force the next sync to re-read
+        self.build_rows()
+        if mirror_control.is_running():
+            self.restart_mirror()
+
+    def add_speaker(self):
+        try:
+            available = device_scan.addable_outputs()
+        except Exception as exc:
+            messagebox.showerror("Add a speaker", f"Could not scan for speakers:\n{exc}")
+            return
+
+        if not available:
+            messagebox.showinfo(
+                "Add a speaker",
+                "No other speakers found.\n\n"
+                "Everything currently connected is already in the list. Plug in "
+                "or connect a speaker and try again -- Windows only offers a "
+                "device once it is actually connected.")
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("Add a speaker")
+        win.configure(bg=BG)
+        win.resizable(False, False)
+        win.transient(self.root)
+        win.grab_set()
+
+        tk.Label(win, text="Detected speakers", bg=BG, fg=FG,
+                  font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=16, pady=(14, 2))
+        tk.Label(win, text="Pick one to start playing to it as well.",
+                  bg=BG, fg=MUTED, font=("Segoe UI", 8)).pack(anchor="w", padx=16)
+
+        def choose(dev):
+            device_store.add_output(dev["name"], dev["label"])
+            win.destroy()
+            self.rebuild_rows()
+
+        for dev in available:
+            b = tk.Button(
+                win, text=f"{dev['label']}\n{dev['name']}  ·  {dev['rate']} Hz",
+                justify="left", anchor="w", bd=0, cursor="hand2",
+                bg=CARD, fg=FG, activebackground=CARD, activeforeground=ACCENT,
+                font=("Segoe UI", 9), padx=12, pady=8,
+                command=lambda d=dev: choose(d),
+            )
+            b.pack(fill="x", padx=16, pady=4)
+
+        tk.Button(win, text="Cancel", command=win.destroy, bd=0, cursor="hand2",
+                   bg=BG, fg=MUTED, activebackground=BG,
+                   font=("Segoe UI", 9)).pack(pady=(6, 14))
 
     # --- mirror control ---
     def restart_mirror(self):
@@ -266,6 +362,12 @@ class App:
         active = [o for o in outputs if o.get("active", True)]
         slowest = max((o["latency_ms"] for o in active), default=None)
         by_name = {o["name"]: o for o in outputs}
+
+        try:
+            connected = device_scan.connection_status()
+        except Exception:
+            connected = {}
+
         for row in self.rows:
             out = by_name.get(row.name, {})
             row.set_delay_text(
@@ -273,6 +375,7 @@ class App:
                 out.get("active") and out.get("latency_ms") == slowest,
                 out.get("muted_by_mode", False),
             )
+            row.set_connected(connected.get(row.name, True))
         self.refresh_mode()
 
     def queue_volume(self, name, value):
@@ -298,7 +401,14 @@ class App:
             return
         self._store_mtime = mtime
 
-        by_name = {o["name"]: o for o in device_store.get_outputs()}
+        outputs = device_store.get_outputs()
+        # The speaker list itself changed elsewhere -- redraw rather than
+        # trying to map values onto rows that no longer line up.
+        if {o["name"] for o in outputs} != {r.name for r in self.rows}:
+            self.build_rows()
+            return
+
+        by_name = {o["name"]: o for o in outputs}
         self.loading = True
         try:
             for row in self.rows:
