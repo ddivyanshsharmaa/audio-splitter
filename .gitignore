@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+
+# Personal device names -- copy config.example.py to config.py instead
+config.py
+
+# Runtime state
+delay_ms.txt
+prev_default.txt
+audio_split.pid
+error.log
