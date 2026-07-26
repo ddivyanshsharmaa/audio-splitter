@@ -43,24 +43,21 @@ $toggle.Hotkey = "CTRL+ALT+B"
 $toggle.Description = "Toggle mirroring aux speaker audio to Bluetooth speaker"
 $toggle.Save()
 
-$up = $WshShell.CreateShortcut("$env:USERPROFILE\Desktop\Audio Delay Increase.lnk")
-$up.TargetPath = "$here\venv\Scripts\pythonw.exe"
-$up.Arguments = "`"$here\adjust_delay.pyw`" +"
-$up.WorkingDirectory = $here
-$up.Hotkey = "CTRL+ALT+O"
-$up.Description = "Increase aux delay by 10ms (sync aux later, closer to Bluetooth)"
-$up.Save()
+$cal = $WshShell.CreateShortcut("$env:USERPROFILE\Desktop\Audio Calibrate.lnk")
+$cal.TargetPath = "$here\venv\Scripts\python.exe"
+$cal.Arguments = "`"$here\calibrate.py`""
+$cal.WorkingDirectory = $here
+$cal.Hotkey = "CTRL+ALT+K"
+$cal.Description = "Open the per-device latency calibration tool"
+$cal.Save()
 
-$down = $WshShell.CreateShortcut("$env:USERPROFILE\Desktop\Audio Delay Decrease.lnk")
-$down.TargetPath = "$here\venv\Scripts\pythonw.exe"
-$down.Arguments = "`"$here\adjust_delay.pyw`" -"
-$down.WorkingDirectory = $here
-$down.Hotkey = "CTRL+ALT+P"
-$down.Description = "Decrease aux delay by 10ms (sync aux earlier)"
-$down.Save()
+# Old two-device shortcuts from before multi-output support, if present.
+Remove-Item "$env:USERPROFILE\Desktop\Audio Delay Increase.lnk" -ErrorAction SilentlyContinue
+Remove-Item "$env:USERPROFILE\Desktop\Audio Delay Decrease.lnk" -ErrorAction SilentlyContinue
 
 Write-Host ""
 Write-Host "Done. Before first use:" -ForegroundColor Green
 Write-Host "  1. Run: .\venv\Scripts\python.exe .\list_devices.py"
-Write-Host "  2. Edit config.py with your own device names from that list"
-Write-Host "  3. Press Ctrl+Alt+B to turn it on"
+Write-Host "  2. Edit config.py -- list every speaker you want in OUTPUTS"
+Write-Host "  3. Run: .\venv\Scripts\python.exe .\device_check.py  (confirm each is audible)"
+Write-Host "  4. Press Ctrl+Alt+B to turn it on, Ctrl+Alt+K to calibrate sync"

@@ -3,6 +3,7 @@ Toggle target for the desktop shortcut / hotkey.
 First press:  saves current default playback device, switches Windows'
               default output to the silent virtual sink, starts
               audio_split.py hidden in the background (beep = ON).
+              Every speaker in config.py's OUTPUTS starts playing.
 Second press: stops the mirror, restores the previous default device
               (beep = OFF).
 """
@@ -10,8 +11,8 @@ import os
 import subprocess
 import winsound
 
-import audio_split
 import proc_utils
+from config import VIRTUAL_SINK_NAME
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PREV_DEFAULT_FILE = os.path.join(HERE, "prev_default.txt")
@@ -64,7 +65,7 @@ def start():
     with open(PREV_DEFAULT_FILE, "w", encoding="utf-8") as f:
         f.write(prev)
 
-    set_default_playback(audio_split.VIRTUAL_SINK_NAME)
+    set_default_playback(VIRTUAL_SINK_NAME)
 
     subprocess.Popen(
         [PYTHONW, SCRIPT],

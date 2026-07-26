@@ -1,116 +1,149 @@
 # audio-splitter
 
-Play the same audio out of a wired (aux) speaker and a Bluetooth speaker
-**at the same time**, in sync, on Windows — no virtual audio driver to
-install, no reboot, no paid software.
+Play the same audio through **every speaker you own at once**, in sync, on
+Windows — laptop speakers, a wired aux pair, HDMI monitor speakers, and a
+Bluetooth speaker, all together. No virtual audio driver to install, no
+reboot, no paid software.
 
-Windows only ever sends system audio to one output device at a time.
-This routes everything through a silent virtual sink first, then fans it
-out live to both a real aux output and a Bluetooth speaker, deliberately
-delaying the aux copy to match Bluetooth's own encode/transmit/decode
-latency so the two stay synced instead of echoing.
+Windows only ever sends system audio to one output device at a time. This
+routes everything through a silent virtual sink, captures it once, and
+fans it out live to as many real outputs as you list — delaying each one
+just enough to cancel out the differences in their natural latency, so
+Bluetooth doesn't echo behind the wired speakers.
 
 ## Requirements
 
 - Windows 10/11
 - Python 3.10+
-- A genuine **silent virtual audio device** already available on your
-  machine to use as the routing point. Many Windows installs already have
-  one from other software (e.g. `Speakers (SW Audio)`, installed by some
-  NVIDIA driver packages as `ROOT\CSVAD`, the Microsoft sample virtual
-  audio device). Check `list_devices.py`'s output for anything that looks
-  virtual/software-only. If you don't have one, install a free virtual
-  audio cable (e.g. VB-CABLE) and use that instead — you only need it to
-  exist, not to route audio manually.
+- A genuine **silent virtual audio device** to use as the routing point.
+  Many Windows installs already have one from other software (e.g.
+  `Speakers (SW Audio)`, the Microsoft sample virtual audio device that
+  ships with some driver packages). Check `list_devices.py`'s output for
+  anything virtual/software-only. If you don't have one, install a free
+  virtual audio cable (e.g. VB-CABLE) — you only need it to exist, not to
+  route anything manually.
 
 ## Setup
 
 ```powershell
-git clone <this repo>
+git clone https://github.com/ddivyanshsharmaa/audio-splitter
 cd audio-splitter
 .\setup.ps1
 ```
 
-`setup.ps1` creates a venv, installs Python dependencies, installs the
-free `AudioDeviceCmdlets` PowerShell module (used to switch the Windows
-default device and force volume), copies `config.example.py` to
-`config.py`, and creates three desktop shortcuts with global hotkeys.
+`setup.ps1` creates a venv, installs dependencies, installs the free
+`AudioDeviceCmdlets` PowerShell module, copies `config.example.py` to
+`config.py`, and creates the desktop shortcuts with global hotkeys.
 
-Then find your own device names:
+Then list your devices:
 
 ```powershell
 .\venv\Scripts\python.exe .\list_devices.py
 ```
 
-and put them in `config.py` (gitignored, so your device names stay local):
+and list every speaker you want in `config.py` (gitignored, so your device
+names stay local):
 
 ```python
-VIRTUAL_SINK_NAME = "Speakers (SW Audio)"          # your silent virtual sink
-AUX_NAME = "Speakers (Realtek(R) Audio)"           # your aux-connected speakers
-BT_NAME = "Headphones (Your Bluetooth Speaker)"    # your Bluetooth speaker
+VIRTUAL_SINK_NAME = "Speakers (SW Audio)"
+
+OUTPUTS = [
+    {"name": "Speakers (Realtek",  "label": "Laptop speakers", "latency_ms": 0},
+    {"name": "Headphone (Realtek", "label": "Aux speakers",    "latency_ms": 0},
+    {"name": "HDMI",               "label": "HDMI monitor",    "latency_ms": 40},
+    {"name": "Your BT Speaker",    "label": "Bluetooth",       "latency_ms": 200},
+]
 ```
 
-Substring matches are fine — a distinctive fragment of the name works as
-well as the full string.
+Names are matched as substrings, so a distinctive fragment is enough.
+
+Finally, confirm each one is actually audible in your physical setup:
+
+```powershell
+.\venv\Scripts\python.exe .\device_check.py
+```
+
+This plays a tone through each device one at a time, then all together.
+Worth doing — some monitors have no speakers at all, and **many laptops
+mute their internal speakers whenever something is plugged into the 3.5mm
+jack** (hardware jack-sensing), which no software can override.
 
 ## Usage
 
 | Hotkey | Action |
 |---|---|
-| **Ctrl+Alt+B** | Toggle the mirror on/off. On: switches Windows' default output to the virtual sink and starts mirroring to both real outputs. Off: stops the mirror and restores whatever your default device was before. |
-| **Ctrl+Alt+O** | Increase the aux-side delay by 10ms (use if Bluetooth is lagging behind aux). |
-| **Ctrl+Alt+P** | Decrease the aux-side delay by 10ms (use if you've overshot). |
+| **Ctrl+Alt+B** | Toggle the mirror on/off. On: switches Windows' default output to the virtual sink and starts playing through every configured speaker. Off: stops and restores your previous default device. |
+| **Ctrl+Alt+K** | Open the calibration tool to sync the speakers. |
 
-A beep confirms each action since these run windowless (high pitch = on /
-delay increased, low pitch = off; pitch scales roughly with the new delay
-value on adjust).
+A beep confirms the toggle since it runs windowless (high = on, low = off).
 
-### Calibrating the delay
+## Calibrating sync
 
-Bluetooth's inherent latency (100–250ms typical, depends on codec) isn't
-something software can remove — but it needs to be matched, not
-eliminated, so both speakers emit sound at the same instant. Loop
-something with a sharp repeated transient (a clap track, metronome, drum
-loop — not sustained music) and nudge Ctrl+Alt+O/P until the two speakers
-sound like one hit instead of two. The value is saved to `delay_ms.txt`
-and persists across sessions.
+Each output declares its own `latency_ms` — how far *that device* naturally
+lags. The script then holds every output back by
+`(slowest latency − its own latency)`, so they all emit sound at the same
+instant. Bluetooth is usually the slowest by far (100–300ms depending on
+codec); wired analog is effectively zero.
 
-Note: even a perfectly matched delay can still sound slightly smeared if
-the two speakers sit at very different distances from your listening
-position — sound itself takes about 1ms to travel every 34cm, and no
-software fix can compensate for room geometry.
+Bluetooth latency can't be removed — only *matched*, by making everything
+else wait for it.
+
+Play something with a sharp repeated beat (a clap track or metronome beats
+guesswork), turn the mirror on, then press **Ctrl+Alt+K**:
+
+```
+      Device                  own latency   held back by
+  --------------------------------------------------------------
+     1. Laptop speakers            0 ms         310 ms
+     2. Aux speakers               0 ms         310 ms
+     3. HDMI monitor              40 ms         270 ms
+  >> 4. Bluetooth                310 ms           0 ms  <- slowest
+```
+
+Select a device with its number key, then:
+
+- it sounds **early** relative to the others → raise its latency (`+`)
+- it sounds **late** relative to the others → lower its latency (`-`)
+- `PgUp`/`PgDn` for 50ms jumps, `ENTER` to apply and hear the result
+
+Values are saved to `latencies.json` and persist across sessions.
+
+Note: even perfectly matched delays can sound slightly smeared if your
+speakers sit at very different distances from you — sound itself takes
+about 1ms to travel every 34cm, and no software can fix room geometry.
 
 ### Troubleshooting
 
 **Check `error.log` first.** Everything runs windowless, so failures have
-nowhere to print — a device name in `config.py` that matches nothing, or a
-speaker that dropped off mid-session, gets written there instead.
+nowhere to print — a name in `config.py` matching no device, or a speaker
+that dropped off mid-session, gets written there instead.
 
-- **No sound at all**: check `Get-AudioDevice -List` (after
-  `Import-Module AudioDeviceCmdlets`) shows your default device as
-  expected. If it's stuck on the virtual sink with nothing playing,
-  something killed the mirror process without going through
-  `toggle.pyw`'s cleanup — toggle it off and back on.
-- **Bluetooth quieter than expected**: once a device isn't the Windows
-  default, the normal volume slider stops reaching it. The mirror forces
-  both outputs to 100% on every start, but check `tone_test.py` if you
-  suspect it isn't taking effect.
-- **Bluetooth speaker seems unreachable**: run `tone_test.py` — it sends
-  a direct test tone to `BT_NAME`, bypassing the whole mirror pipeline,
-  to isolate whether the problem is the Bluetooth connection itself or
-  something in this project.
+- **No sound at all**: check your default device (`Import-Module
+  AudioDeviceCmdlets; Get-AudioDevice -List`). If it's stuck on the
+  virtual sink with nothing running, something killed the mirror without
+  going through `toggle.pyw`'s cleanup — toggle off and on.
+- **One speaker silent**: run `device_check.py` to test it in isolation,
+  bypassing the mirror entirely. If it's silent there too, the problem is
+  that device or its connection, not this project.
+- **A speaker is quieter than expected**: once a device isn't the Windows
+  default, the taskbar volume slider stops reaching it. The mirror forces
+  every output to 100% on start.
 
 ## How it works
 
-`audio_split.py` opens two independent WASAPI loopback captures on the
-virtual sink (one per output thread) and writes each stream out to a real
-device — one immediately (Bluetooth, which adds its own latency
-downstream), one through a small FIFO delay buffer (aux, to match it).
-`toggle.pyw` and `adjust_delay.pyw` manage starting/stopping the worker
-and switching the Windows default device, tracking the running process by
-matching its command line (`proc_utils.py`) rather than a self-reported
-PID file, since Python's Windows venv launcher spawns a separate stub and
-child process.
+`audio_split.py` opens a single WASAPI loopback capture on the virtual
+sink and fans each chunk out to one queue per output. A writer thread per
+device drains its queue through a FIFO delay buffer sized to that device's
+hold-back, then writes to the endpoint. Capturing once and distributing
+guarantees every speaker gets byte-identical audio; bounded queues mean a
+device that stalls drops old audio instead of drifting further behind.
+
+`toggle.pyw` manages the Windows default device and the worker process,
+tracking it by matching command lines (`proc_utils.py`) rather than a
+self-reported PID, since Python's Windows venv launcher spawns a separate
+stub and child process. `volume_util.py` uses the Core Audio
+`IAudioEndpointVolume` interface via pycaw to set per-device volume, which
+works regardless of which device is currently default.
 
 ## License
 
