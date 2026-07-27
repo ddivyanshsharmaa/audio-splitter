@@ -6,6 +6,7 @@ here and takes precedence, so tuning never means editing source files.
 """
 import json
 import os
+import time
 
 from config import OUTPUTS
 
@@ -41,11 +42,34 @@ def _load():
 
 
 def _save(data):
+    """Write settings atomically, retrying briefly if the file is busy.
+
+    Several processes touch this file -- the app writes on every slider
+    movement while the mirror polls it for latency changes -- and Windows
+    refuses to replace a file another process currently has open. Without
+    the retry those collisions silently drop the change.
+    """
     tmp = STORE_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
-    # Atomic replace so a reader never sees a half-written file.
-    os.replace(tmp, STORE_FILE)
+
+    last_error = None
+    for attempt in range(10):
+        try:
+            os.replace(tmp, STORE_FILE)
+            return
+        except PermissionError as exc:
+            last_error = exc
+            time.sleep(0.02 * (attempt + 1))
+
+    # Fall back to writing in place rather than losing the change; a reader
+    # catching it mid-write just falls back to defaults for one poll.
+    try:
+        with open(STORE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.remove(tmp)
+    except OSError:
+        raise last_error
 
 
 def get_mode():

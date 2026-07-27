@@ -178,6 +178,11 @@ class App:
         self._store_mtime = None
         self._pending_volume = {}
         self._volume_job = None
+        # Scanning for devices costs ~70ms because it initialises PortAudio,
+        # so it must never sit in a slider's callback path. Cached here and
+        # refreshed on a slow timer instead.
+        self._connected = {}
+        self._conn_ticks = 0
 
         root.title("Audio Splitter")
         root.configure(bg=BG)
@@ -252,6 +257,7 @@ class App:
         )
         hint.pack(fill="x", pady=(10, 0))
 
+        self.refresh_connections()
         self.build_rows()
         self.tick()
 
@@ -306,7 +312,7 @@ class App:
 
         for dev in available:
             b = tk.Button(
-                win, text=f"{dev['label']}\n{dev['name']}  ·  {dev['rate']} Hz",
+                win, text=f"{dev['label']}\n{dev['name']}",
                 justify="left", anchor="w", bd=0, cursor="hand2",
                 bg=CARD, fg=FG, activebackground=CARD, activeforeground=ACCENT,
                 font=("Segoe UI", 9), padx=12, pady=8,
@@ -363,11 +369,6 @@ class App:
         slowest = max((o["latency_ms"] for o in active), default=None)
         by_name = {o["name"]: o for o in outputs}
 
-        try:
-            connected = device_scan.connection_status()
-        except Exception:
-            connected = {}
-
         for row in self.rows:
             out = by_name.get(row.name, {})
             row.set_delay_text(
@@ -375,8 +376,18 @@ class App:
                 out.get("active") and out.get("latency_ms") == slowest,
                 out.get("muted_by_mode", False),
             )
-            row.set_connected(connected.get(row.name, True))
+            row.set_connected(self._connected.get(row.name, True))
         self.refresh_mode()
+
+    def refresh_connections(self):
+        """Rescan which speakers are plugged in. Deliberately separate from
+        refresh_delays, which runs on every slider movement."""
+        try:
+            self._connected = device_scan.connection_status()
+        except Exception:
+            return
+        for row in self.rows:
+            row.set_connected(self._connected.get(row.name, True))
 
     def queue_volume(self, name, value):
         self._pending_volume[name] = value
@@ -433,6 +444,11 @@ class App:
     def tick(self):
         self.sync_from_store()
         self.update_status()
+        # Device scanning is expensive, so do it rarely -- speakers get
+        # plugged in on human timescales, not every frame.
+        if self._conn_ticks % 6 == 0:
+            self.refresh_connections()
+        self._conn_ticks += 1
         self.root.after(700, self.tick)
 
 

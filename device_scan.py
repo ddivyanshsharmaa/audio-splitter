@@ -2,13 +2,19 @@
 Finds the speakers available on this machine, so they can be added from the
 app instead of by hand-editing config.py.
 
-Only WASAPI endpoints are offered: they are the ones the mirror can
-actually drive (see find_output in audio_split.py -- the MME duplicates
-Windows also exposes produce no sound on some devices). The virtual sink is
-excluded because it is the routing point, not a speaker, and anything
-already configured is excluded too.
+Uses the Core Audio device enumerator via pycaw rather than PortAudio.
+That matters: initialising and tearing down PortAudio costs ~70ms and,
+done repeatedly inside the GUI process, crashed it outright with an access
+violation. This is cheap enough to call from the app's timer.
+
+Only *active* render endpoints are listed. Windows keeps a device listed
+after its cable is pulled or a Bluetooth speaker drops its audio profile,
+but marks it Unplugged/NotPresent -- and a speaker in that state is the
+usual reason for "it's configured but silent".
 """
-import pyaudiowpatch as pyaudio
+import comtypes
+from pycaw.constants import CLSID_MMDeviceEnumerator, DEVICE_STATE, EDataFlow
+from pycaw.pycaw import AudioUtilities, IMMDeviceEnumerator
 
 import device_store
 from config import VIRTUAL_SINK_NAME
@@ -22,33 +28,31 @@ def _shorten(name):
 
 
 def all_outputs():
-    """Every WASAPI playback endpoint, as {name, rate, is_sink}."""
-    p = pyaudio.PyAudio()
-    try:
-        wasapi = p.get_host_api_info_by_type(pyaudio.paWASAPI)["index"]
-        found = []
-        for i in range(p.get_device_count()):
-            d = p.get_device_info_by_index(i)
-            if d["hostApi"] != wasapi or d["maxOutputChannels"] <= 0:
-                continue
-            found.append({
-                "name": d["name"],
-                "rate": int(d["defaultSampleRate"]),
-                "is_sink": VIRTUAL_SINK_NAME.lower() in d["name"].lower(),
-            })
-        return found
-    finally:
-        p.terminate()
+    """Every currently active playback endpoint, as {name, is_sink}."""
+    enumerator = comtypes.CoCreateInstance(
+        CLSID_MMDeviceEnumerator, IMMDeviceEnumerator,
+        comtypes.CLSCTX_INPROC_SERVER)
+    collection = enumerator.EnumAudioEndpoints(
+        EDataFlow.eRender.value, DEVICE_STATE.ACTIVE.value)
+
+    found = []
+    for i in range(collection.GetCount()):
+        try:
+            device = AudioUtilities.CreateDevice(collection.Item(i))
+        except Exception:
+            continue
+        name = getattr(device, "FriendlyName", None)
+        if not name:
+            continue
+        found.append({
+            "name": name,
+            "is_sink": VIRTUAL_SINK_NAME.lower() in name.lower(),
+        })
+    return found
 
 
 def connection_status():
-    """Which configured speakers are actually plugged in / connected.
-
-    Windows keeps listing an endpoint after the cable is pulled or a
-    Bluetooth speaker drops its audio profile, but it stops being a real
-    output -- worth showing, because a "silent speaker" is usually this
-    rather than anything misconfigured.
-    """
+    """Which configured speakers are actually plugged in / connected."""
     live = [d["name"].lower() for d in all_outputs()]
     return {o["name"]: any(o["name"].lower() in name for name in live)
             for o in device_store.get_outputs()}
@@ -69,9 +73,5 @@ def addable_outputs():
         lowered = dev["name"].lower()
         if any(c in lowered for c in configured):
             continue
-        available.append({
-            "name": dev["name"],
-            "label": _shorten(dev["name"]),
-            "rate": dev["rate"],
-        })
+        available.append({"name": dev["name"], "label": _shorten(dev["name"])})
     return available
