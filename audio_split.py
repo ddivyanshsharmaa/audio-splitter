@@ -17,13 +17,28 @@ import time
 import traceback
 from datetime import datetime
 
-import numpy as np
-import pyaudiowpatch as pyaudio
+# Defined before the rest of the imports so an import failure -- config.py
+# not created yet, most likely -- can still be written somewhere visible
+# rather than vanishing into a windowless process.
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "error.log")
 
-import device_store
-import resampler
-import volume_util
-from config import VIRTUAL_SINK_NAME
+
+def log(message):
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {message}\n")
+
+
+try:
+    import numpy as np
+    import pyaudiowpatch as pyaudio
+
+    import device_store
+    import resampler
+    import volume_util
+    from appconfig import VIRTUAL_SINK_NAME
+except Exception as exc:
+    log(f"Could not start: {exc}")
+    raise
 
 # ~10ms at 44.1/48kHz. Smaller chunks give finer delay resolution but cost
 # a fixed amount of Python work each, and with one resampling writer per
@@ -39,18 +54,6 @@ CHUNK = 480
 # pipeline settled most of a second late; a handful of chunks rides out a
 # scheduling hiccup without becoming audible lag.
 QUEUE_MAX_CHUNKS = 4
-
-# This runs under pythonw.exe with no console, so anything printed to
-# stdout/stderr is lost. Failures (a device name in config.py that matches
-# nothing, a speaker that disconnected) would otherwise be completely
-# silent -- log them somewhere the user can actually read.
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "error.log")
-
-
-def log(message):
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {message}\n")
-
 
 def find_loopback(p, name_substr):
     for d in p.get_loopback_device_info_generator():
@@ -205,8 +208,10 @@ def main():
 
             dev = find_output(p, out["name"])
             if dev is None:
-                log(f"Output device not found: {out['name']!r} ({out.get('label', '')}) "
-                    f"-- check the name in config.py against list_devices.py output.")
+                log(f"Skipping {out.get('label') or out['name']!r}: no output device "
+                    f"matches {out['name']!r}. Either it is disconnected (unplugged, "
+                    f"monitor asleep, Bluetooth audio dropped), or the name matches "
+                    f"nothing -- compare it with what list_devices.py prints.")
                 continue
 
             # Endpoints keep whatever volume they were last left at once

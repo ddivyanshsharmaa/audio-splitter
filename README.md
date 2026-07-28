@@ -174,6 +174,17 @@ that dropped off mid-session, gets written there instead.
 - **A speaker is quieter than expected**: once a device isn't the Windows
   default, the taskbar volume slider stops reaching it — use the app's
   per-device volume slider instead, which drives the endpoint directly.
+- **A speaker marked "not connected"**: Windows keeps listing an endpoint
+  after its cable is pulled, a monitor sleeps, or a Bluetooth speaker drops
+  its audio profile. Nothing here can revive it — reconnect the device.
+- **Laptop speakers silent while something is in the headphone jack**: most
+  laptops mute them in hardware when the jack is occupied. No software can
+  override that.
+- **A speaker plays noticeably later than the others even at 0ms**: some
+  outputs have vendor DSP (loudness equalisation and the like) applied
+  after this app, which adds its own delay. Rather than fight it, measure
+  the gap and set that speaker's latency to it — compensating is what the
+  slider is for.
 
 ## How it works
 
@@ -188,12 +199,26 @@ Delay buffers are resized on the fly: a watcher thread notices when
 `settings.json` changes and updates each writer's hold-back, which is what
 makes the app's sliders take effect mid-playback rather than on restart.
 
-`toggle.pyw` manages the Windows default device and the worker process,
-tracking it by matching command lines (`proc_utils.py`) rather than a
-self-reported PID, since Python's Windows venv launcher spawns a separate
-stub and child process. `volume_util.py` uses the Core Audio
-`IAudioEndpointVolume` interface via pycaw to set per-device volume, which
-works regardless of which device is currently default.
+Outputs are resolved to their **WASAPI** endpoint specifically. Windows
+exposes each speaker once per audio interface (MME, DirectSound, WASAPI),
+MME entries come first and truncate names to 31 characters, and some
+endpoints — HDMI and laptop speakers among them — produce no sound at all
+through MME. WASAPI in shared mode also only accepts a stream at the
+endpoint's own rate, so `resampler.py` converts per output, carrying phase
+across chunk boundaries so the seams don't click.
+
+`toggle.pyw` and the app share `mirror_control.py` for starting, stopping
+and swapping the Windows default device. It tracks the worker by matching
+command lines (`proc_utils.py`) rather than a self-reported PID, since
+Python's Windows venv launcher spawns a separate stub and child process,
+and it refuses to record the virtual sink as the device to restore — doing
+so would leave all audio pointed at a silent device.
+
+`volume_util.py` drives the Core Audio `IAudioEndpointVolume` interface via
+pycaw, which works regardless of which device is default, and caches it per
+device. `device_scan.py` uses the same Core Audio enumerator rather than
+PortAudio: initialising PortAudio costs ~70ms, and doing it repeatedly from
+the GUI crashed the process outright.
 
 ## License
 

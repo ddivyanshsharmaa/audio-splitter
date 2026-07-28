@@ -17,7 +17,7 @@ from pycaw.constants import CLSID_MMDeviceEnumerator, DEVICE_STATE, EDataFlow
 from pycaw.pycaw import AudioUtilities, IMMDeviceEnumerator
 
 import device_store
-from config import VIRTUAL_SINK_NAME
+from appconfig import VIRTUAL_SINK_NAME
 
 
 def _shorten(name):

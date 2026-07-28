@@ -11,10 +11,16 @@ import os
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-import device_scan
-import device_store
-import mirror_control
-import volume_util
+try:
+    import device_scan
+    import device_store
+    import mirror_control
+    import volume_util
+except Exception as exc:  # most likely config.py hasn't been created yet
+    _root = tk.Tk()
+    _root.withdraw()
+    messagebox.showerror("Audio Splitter", str(exc))
+    raise SystemExit(1)
 
 BG = "#1e1f26"
 FG = "#e8e8ec"

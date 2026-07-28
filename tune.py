@@ -24,7 +24,7 @@ import pyaudiowpatch as pyaudio
 
 import device_store
 import proc_utils
-from config import VIRTUAL_SINK_NAME
+from appconfig import VIRTUAL_SINK_NAME
 
 CLICK_EVERY = 0.7
 AMPLITUDE = 0.18      # deliberately soft

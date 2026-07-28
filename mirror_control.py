@@ -9,7 +9,7 @@ import subprocess
 
 import device_store
 import proc_utils
-from config import VIRTUAL_SINK_NAME
+from appconfig import VIRTUAL_SINK_NAME
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PYTHONW = os.path.join(HERE, "venv", "Scripts", "pythonw.exe")

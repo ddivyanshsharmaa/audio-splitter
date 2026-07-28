@@ -14,12 +14,18 @@ work. See README.md for how to find one.
 OUTPUTS lists every speaker you want to play at once. Names are matched as
 substrings, so a distinctive fragment is enough.
 
+You only need to get this roughly right, and only once: after the first
+run the app manages the speaker list itself (Add a speaker / the x button)
+and keeps it in settings.json. VIRTUAL_SINK_NAME is the one value always
+read from here.
+
 `latency_ms` is how far THAT device naturally lags behind. Wired/analog
 outputs are effectively 0. Bluetooth is the big one (100-300ms depending
-on codec). HDMI is usually small but not zero. You do not have to guess
-well -- run `calibrate.py` and tune each one by ear.
+on codec). HDMI is usually small but not zero. Guessing is fine -- the
+app's sliders tune it live, and tune.py plays a click track to do it by
+ear.
 
-The script delays every output by (slowest latency - its own latency), so
+The mirror delays every output by (slowest latency - its own latency), so
 they all emit sound at the same instant.
 """
 

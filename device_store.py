@@ -8,7 +8,7 @@ import json
 import os
 import time
 
-from config import OUTPUTS
+from appconfig import OUTPUTS
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STORE_FILE = os.path.join(HERE, "settings.json")
