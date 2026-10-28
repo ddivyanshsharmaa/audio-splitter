@@ -13,3 +13,9 @@ audio_split.pid
 error.log
 app_out.txt
 app_err.txt
+
+# macOS/Linux worker state and local verification
+unix-worker.json
+unix-worker.json.tmp
+unix-worker.lock
+REPORT-cross-platform.md

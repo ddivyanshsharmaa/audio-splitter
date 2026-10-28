@@ -5,6 +5,10 @@ Windows — laptop speakers, a wired aux pair, HDMI monitor speakers, and a
 Bluetooth speaker, all together. No virtual audio driver to install, no
 reboot, no paid software.
 
+The original Windows setup below is unchanged. Separate **macOS and Linux
+beta** backends now share the control panel; see the platform sections below.
+macOS needs BlackHole; Linux uses its existing PulseAudio/PipeWire server.
+
 Windows only ever sends system audio to one output device at a time. This
 routes everything through a silent virtual sink, captures it once, and
 fans it out live to as many real outputs as you list — delaying each one
@@ -219,6 +223,186 @@ pycaw, which works regardless of which device is default, and caches it per
 device. `device_scan.py` uses the same Core Audio enumerator rather than
 PortAudio: initialising PortAudio costs ~70ms, and doing it repeatedly from
 the GUI crashed the process outright.
+
+## macOS (beta)
+
+**beta: built and checked on Windows with automated tests and syntax/type
+checks; not yet tested on real Mac/Linux hardware.** The checks performed
+were Python compilation, bash syntax checks and automated tests, not a
+static type checker. Hardware playback and permissions still need validation.
+
+Requirements: Python 3.10+ with Tk support, and the free
+[BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole) virtual audio
+driver. Install BlackHole following its upstream instructions, then:
+
+```bash
+git clone https://github.com/ddivyanshsharmaa/audio-splitter
+cd audio-splitter
+bash setup.sh
+bash launch.sh list
+bash launch.sh
+```
+
+If an existing `config.py` came from Windows, edit it before starting:
+set `VIRTUAL_SINK_NAME = "BlackHole 2ch"` and `OUTPUTS = []`, and remove or
+rename the old `settings.json` to seed a fresh speaker list. Setup preserves
+existing configuration. New installations get `config.unix.example.py`,
+with an empty list; use **+ Add a speaker** to choose your real outputs.
+
+Start with a **real speaker selected in System Settings > Sound > Output**.
+Turn the mirror on in the panel. It opens BlackHole's input, opens each real
+speaker's output, then uses CoreAudio to select BlackHole as normal system
+output. Turning it off restores the previous device. No Multi-Output Device
+is needed: the worker itself plays to the speakers. Do not add BlackHole,
+an aggregate containing it, or a Multi-Output Device containing it as a
+speaker, because that creates a feedback path. The separate system-alert
+output and applications pinned to a specific output are not redirected.
+
+Grant **Microphone** access to the launching terminal/Python if macOS asks
+(System Settings > Privacy & Security > Microphone). BlackHole capture is
+an audio-input stream, although the physical microphone is never opened.
+No Accessibility or Input Monitoring permission is needed. Follow macOS's
+normal approval prompts when installing BlackHole; do not disable security
+features. Run in your logged-in desktop session, without `sudo`.
+
+Latency uses the existing resampler and a FIFO per speaker (roughly 10 ms
+steps at 48 kHz). Volume is software gain applied only to this mirror,
+within about 300 ms of a slider change. Speaker enable/add/remove and mode
+changes restart routing briefly. Independent hardware clocks can still
+cause occasional dropped chunks or audible drift over long sessions; this
+is not a sample-locked professional audio interface. Only stereo and mono
+outputs are supported. Reopen the panel/worker if a newly connected device
+does not appear. Identically named devices require distinct OS names.
+The mirror's volume gain cannot override a muted/quiet physical device;
+check the device's own volume and OS sound settings too.
+
+## Linux (beta)
+
+**beta: built and checked on Windows with automated tests and syntax/type
+checks; not yet tested on real Mac/Linux hardware.** The checks performed
+were Python compilation, bash syntax checks and automated tests, not a
+static type checker. Hardware playback and server compatibility still need
+validation.
+
+Requirements: Python 3.10+, Tk, Python venv support, and a running user
+**PulseAudio or PipeWire-Pulse** audio server. Install `pactl` and `paplay`
+from your distribution (typically `pulseaudio-utils`; this supplies clients,
+not a reason to replace PipeWire). `pactl` must support JSON output and
+`get-default-sink`. ALSA-only systems are unsupported. For example, on
+Debian/Ubuntu the Python components are `python3`, `python3-venv` and
+`python3-tk`.
+
+```bash
+git clone https://github.com/ddivyanshsharmaa/audio-splitter
+cd audio-splitter
+bash setup.sh
+pactl --format=json list sinks
+pactl get-default-sink
+bash launch.sh list
+bash launch.sh
+```
+
+Setup creates `config.py` from the Unix example with
+`VIRTUAL_SINK_NAME = "audio_splitter"` and `OUTPUTS = []`. If migrating an
+existing checkout, update those values and rename its Windows
+`settings.json` first. Add real speakers in the panel; names are the stable
+server sink identifiers, with readable descriptions displayed beside them.
+Exact names win over substrings, and ambiguous matches are rejected.
+
+The worker creates one `module-null-sink` and one `module-loopback` for each
+active output. It selects the silent sink as default and moves existing
+streams on the previous default into it. Streams explicitly routed to other
+outputs stay there. Stop restores the old default, moves applications off
+the silent sink, and unloads only the modules this worker created.
+
+Run as the **same desktop user as your sound server**, without `sudo`.
+No input-device group, microphone, or global-keyboard permission is needed:
+the source is the virtual sink's monitor, never a microphone. Both X11 and
+Wayland use the same audio route. The application adds no network service,
+telemetry or audio recording; setup downloads Python dependencies.
+
+Linux latency is a **server buffer target**, set to 10 ms plus the calculated
+hold-back. The server may clamp it to a device's minimum, and it cannot
+remove Bluetooth delay or guarantee precise synchronisation. Tune by ear.
+Changing latency recreates the affected loopback, causing a brief gap;
+volume updates apply to that loopback's stream within about 300 ms without
+changing the speaker's global volume. Video mode omits speakers over 50 ms
+and adds no synchronisation hold-back, but the server still adds buffering.
+If your server lacks either module, startup fails and cleans up; there is
+no ALSA or native PipeWire-only fallback.
+The physical sink must also be unmuted at an audible volume. PulseAudio's
+flat-volume policy, if enabled, may link stream and device levels.
+
+## macOS/Linux commands and limits
+
+```bash
+bash launch.sh                 # shared control panel
+bash launch.sh list            # available output devices
+bash launch.sh check           # gentle tone per real output, mirror OFF
+bash launch.sh start           # background worker, restores output on stop
+bash launch.sh status          # ON/OFF (process readiness, not proof of audibility)
+bash launch.sh toggle          # mirror on/off
+bash launch.sh mode            # music/video; preserves enabled choices
+bash launch.sh click           # metronome through mirror; Ctrl+C stops clicks
+bash launch.sh stop            # stop worker and restore previous output
+```
+
+For sync calibration, start the mirror and click track, then adjust sliders
+in the panel using the same late/early guidance as Windows. `check` tests
+outputs sequentially; turn the mirror on to check them together. The old
+Windows helpers (`list_devices.py`, `device_check.py`, `tune.py`,
+`auto_calibrate.py`, `toggle*.pyw`, `setup.ps1`) remain Windows entry points.
+Microphone-based automatic calibration is not ported; use the click track
+and sliders. Linux `click` has a short process restart gap every 30 seconds.
+
+Global hotkeys/desktop shortcuts are **not installed automatically** on
+macOS/Linux. You can bind commands with your desktop's keyboard-shortcut
+settings or macOS Shortcuts/Quick Actions: use absolute paths, for example
+`bash /path/to/audio-splitter/launch.sh toggle`. Suggested bindings are
+Ctrl+Alt+K (panel), Ctrl+Alt+B (toggle), Ctrl+Alt+M (mode), where available;
+the OS/desktop may reserve them. There are no Windows-style feedback beeps;
+the panel and CLI report state. Closing the panel leaves the worker running;
+use Off or `stop` before logging out.
+
+Read `error.log` if startup fails or a device disconnects. A failed route
+stops the Unix worker and attempts to restore normal output. If the original
+device disappeared, select another real speaker in OS sound settings.
+Do not run simultaneous copies from different checkouts or combine this
+route with another audio mirror. Normal shutdown and startup exceptions
+clean up; SIGKILL, power loss, or a sound-server crash cannot run cleanup.
+
+After forced termination on macOS, select a real output in Sound Settings.
+On Linux, select a real default with `pactl set-default-sink REAL_SINK`, inspect
+`pactl list short modules`, and use `pactl unload-module ID` for the
+splitter's loopbacks and null sink only (loopbacks first). Match their
+arguments to `source=audio_splitter.monitor` / `sink_name=audio_splitter`;
+do not unload unrelated modules. Reopen/re-route any application still on
+the old sink. A pre-existing sink with the configured name is deliberately
+not taken over or deleted.
+
+### Development checks
+
+Tests run with standard Python on Windows, macOS and Linux. Tests needing
+NumPy, psutil or Tk skip with an explanation when those optional test
+dependencies are absent. Install the appropriate requirements file to run
+all tests (Tk comes from your Python/OS installation), then run:
+
+```bash
+python -m unittest discover -s tests -v
+python tests/test_cross_platform.py
+bash -n setup.sh
+bash -n launch.sh
+```
+
+Tests cover settings/modes, chunked resampling, live FIFO delay, mocked
+Linux/Mac routing and rollback, process identity checks, and the shared
+panel's platform imports. Mocked tests do not prove native audio playback.
+
+The routing uses the public [PulseAudio modules](https://www.freedesktop.org/wiki/Software/PulseAudio/Documentation/User/Modules/),
+[pactl commands](https://manpages.debian.org/testing/pulseaudio-utils/pactl.1.en.html),
+[PipeWire PulseAudio modules](https://docs.pipewire.org/page_pulse_modules.html),
+[sounddevice streams](https://python-sounddevice.readthedocs.io/), and
+[CoreAudio AudioObject APIs](https://developer.apple.com/documentation/coreaudio/audioobjectsetpropertydata(_:_:_:_:_:_:)).
 
 ## License
 

@@ -8,14 +8,18 @@ volume both apply immediately while audio is playing -- no restart, no gap.
 Run:  .\venv\Scripts\pythonw.exe .\app.pyw
 """
 import os
+import sys
 import tkinter as tk
 from tkinter import messagebox, ttk
 
 try:
-    import device_scan
     import device_store
-    import mirror_control
-    import volume_util
+    if sys.platform == "win32":
+        import device_scan
+        import mirror_control
+        import volume_util
+    else:
+        from unix_control import device_scan, mirror_control, volume_util
 except Exception as exc:  # most likely config.py hasn't been created yet
     _root = tk.Tk()
     _root.withdraw()
@@ -295,7 +299,7 @@ class App:
                 "Add a speaker",
                 "No other speakers found.\n\n"
                 "Everything currently connected is already in the list. Plug in "
-                "or connect a speaker and try again -- Windows only offers a "
+                "or connect a speaker and try again -- the OS only offers a "
                 "device once it is actually connected.")
             return
 
