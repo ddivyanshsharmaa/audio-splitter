@@ -236,7 +236,7 @@ Requirements: Python 3.10+ with Tk support, and the free
 driver. Install BlackHole following its upstream instructions, then:
 
 ```bash
-git clone https://github.com/ddivyanshsharmaa/audio-splitter
+git clone --branch main https://github.com/ddivyanshsharmaa/audio-splitter
 cd audio-splitter
 bash setup.sh
 bash launch.sh list
@@ -293,7 +293,7 @@ Debian/Ubuntu the Python components are `python3`, `python3-venv` and
 `python3-tk`.
 
 ```bash
-git clone https://github.com/ddivyanshsharmaa/audio-splitter
+git clone --branch main https://github.com/ddivyanshsharmaa/audio-splitter
 cd audio-splitter
 bash setup.sh
 pactl --format=json list sinks
