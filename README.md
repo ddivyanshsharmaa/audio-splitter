@@ -1,4 +1,21 @@
-# audio-splitter
+<div align="center">
+
+# 🔊 audio-splitter
+
+**Play the same audio through every speaker at once, in sync, on Windows.**
+Laptop speakers, wired aux, HDMI monitor and Bluetooth speaker together. No virtual audio driver, no reboot, no paid software.
+
+[![License](https://img.shields.io/github/license/ddivyanshsharmaa/audio-splitter?style=flat-square)](LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/ddivyanshsharmaa/audio-splitter?style=flat-square)](https://github.com/ddivyanshsharmaa/audio-splitter/commits)
+[![Stars](https://img.shields.io/github/stars/ddivyanshsharmaa/audio-splitter?style=flat-square)](https://github.com/ddivyanshsharmaa/audio-splitter/stargazers)
+![Platform](https://img.shields.io/badge/Windows-10%20%7C%2011-blue?style=flat-square)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square)
+
+<img src="docs/social-preview.png" alt="audio-splitter: Play the same audio through every speaker at once, in sync, on Windows." width="760">
+
+[Setup](#setup) · [Usage](#usage) · [Calibrating sync](#calibrating-sync) · [How it works](#how-it-works)
+
+</div>
 
 Play the same audio through **every speaker you own at once**, in sync, on
 Windows — laptop speakers, a wired aux pair, HDMI monitor speakers, and a
@@ -10,6 +27,13 @@ routes everything through a silent virtual sink, captures it once, and
 fans it out live to as many real outputs as you list — delaying each one
 just enough to cancel out the differences in their natural latency, so
 Bluetooth doesn't echo behind the wired speakers.
+
+## Why people use it
+
+- Play music on **laptop speakers and a Bluetooth speaker at the same time**.
+- Send one video's sound to **HDMI, aux and Bluetooth together** for a room full of speakers.
+- Fix the echo you get when Bluetooth lags behind wired speakers: each output is delayed just enough to line up.
+- Free and open source: no driver, no subscription.
 
 ## Requirements
 
@@ -223,3 +247,7 @@ the GUI crashed the process outright.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+If this saved you time, a ⭐ on the repo helps other people find it.
